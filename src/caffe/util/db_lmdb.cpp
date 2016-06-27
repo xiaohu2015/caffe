@@ -16,6 +16,15 @@ void LMDB::Open(const string& source, Mode mode) {
   if (mode == READ) {
     flags = MDB_RDONLY | MDB_NOTLS;
   }
+  // add by xiecw, 2016/6/27.
+  // There will be memory error if I do not add the next line, error is:
+  // Check failed: mdb_status == 0 (12 vs. 0) Cannot allocate memory
+  //
+  // I do not know why...
+  // refer link below:
+  // https://groups.google.com/forum/#!msg/caffe-users/m4iCrEK2Qy8/2DRRy2VMZUEJ
+  mdb_env_set_mapsize(mdb_env_, 1099511627776/1024);
+
   int rc = mdb_env_open(mdb_env_, source.c_str(), flags, 0664);
 #ifndef ALLOW_LMDB_NOLOCK
   MDB_CHECK(rc);

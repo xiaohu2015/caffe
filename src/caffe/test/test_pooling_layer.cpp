@@ -403,6 +403,27 @@ TYPED_TEST(PoolingLayerTest, TestSetupPadded) {
   EXPECT_EQ(this->blob_top_->width(), 3);
 }
 
+// add by xiecw, 2016/6/26
+TYPED_TEST(PoolingLayerTest, TestSetupAsymmetryPadded) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+  pooling_param->set_kernel_size(4);
+  pooling_param->set_stride(2);
+  pooling_param->set_pad_top(1);
+  pooling_param->set_pad_bottom(2);
+  pooling_param->set_pad_left(1);
+  pooling_param->set_pad_right(0);
+  pooling_param->set_pool(PoolingParameter_PoolMethod_AVE);
+  PoolingLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_->num(), this->blob_bottom_->num());
+  EXPECT_EQ(this->blob_top_->channels(), this->blob_bottom_->channels());
+  EXPECT_EQ(this->blob_top_->height(), 4);
+  EXPECT_EQ(this->blob_top_->width(), 2);
+}
+
+
 TYPED_TEST(PoolingLayerTest, TestSetupGlobalPooling) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
@@ -540,6 +561,50 @@ TYPED_TEST(PoolingLayerTest, TestGradientMaxTopMask) {
   }
 }
 
+// add by xiecw, 2016/6/26
+TYPED_TEST(PoolingLayerTest, TestForwardMaxAsymmetryPadded) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+  pooling_param->set_kernel_size(3);
+  pooling_param->set_stride(2);
+  pooling_param->set_pad_top(0);
+  pooling_param->set_pad_bottom(2);
+  pooling_param->set_pad_left(1);
+  pooling_param->set_pad_right(2);
+  pooling_param->set_pool(PoolingParameter_PoolMethod_MAX);
+  this->blob_bottom_->Reshape(1, 1, 3, 3);
+  // Input:
+  //     [ 1 2 4 ]
+  //     [ 2 3 2 ]
+  //     [ 4 2 1 ]
+  this->blob_bottom_->mutable_cpu_data()[0] = 1;
+  this->blob_bottom_->mutable_cpu_data()[1] = 2;
+  this->blob_bottom_->mutable_cpu_data()[2] = 4;
+  this->blob_bottom_->mutable_cpu_data()[3] = 2;
+  this->blob_bottom_->mutable_cpu_data()[4] = 3;
+  this->blob_bottom_->mutable_cpu_data()[5] = 2;
+  this->blob_bottom_->mutable_cpu_data()[6] = 4;
+  this->blob_bottom_->mutable_cpu_data()[7] = 2;
+  this->blob_bottom_->mutable_cpu_data()[8] = 1;
+  PoolingLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_EQ(this->blob_top_->num(), 1);
+  EXPECT_EQ(this->blob_top_->channels(), 1);
+  EXPECT_EQ(this->blob_top_->height(), 2);
+  EXPECT_EQ(this->blob_top_->width(), 2);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  Dtype epsilon = 1e-8;
+  // Output:
+  //     [ 4 4 ]
+  //     [ 4 2 ]
+  EXPECT_NEAR(this->blob_top_->cpu_data()[0], 4, epsilon);
+  EXPECT_NEAR(this->blob_top_->cpu_data()[1], 4, epsilon);
+  EXPECT_NEAR(this->blob_top_->cpu_data()[2], 4, epsilon);
+  EXPECT_NEAR(this->blob_top_->cpu_data()[3], 2, epsilon);
+}
+
+
 TYPED_TEST(PoolingLayerTest, TestForwardAve) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
@@ -600,6 +665,29 @@ TYPED_TEST(PoolingLayerTest, TestGradientAvePadded) {
       pooling_param->set_kernel_w(kernel_w);
       pooling_param->set_stride(2);
       pooling_param->set_pad(2);
+      pooling_param->set_pool(PoolingParameter_PoolMethod_AVE);
+      PoolingLayer<Dtype> layer(layer_param);
+      GradientChecker<Dtype> checker(1e-2, 1e-2);
+      checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+          this->blob_top_vec_);
+    }
+  }
+}
+
+// add by xiecw, 2016/6/26
+TYPED_TEST(PoolingLayerTest, TestGradientAveAsymmetryPadded) {
+  typedef typename TypeParam::Dtype Dtype;
+  for (int kernel_h = 3; kernel_h <= 4; kernel_h++) {
+    for (int kernel_w = 3; kernel_w <= 4; kernel_w++) {
+      LayerParameter layer_param;
+      PoolingParameter* pooling_param = layer_param.mutable_pooling_param();
+      pooling_param->set_kernel_h(kernel_h);
+      pooling_param->set_kernel_w(kernel_w);
+      pooling_param->set_stride(2);
+      pooling_param->set_pad_top(1);
+      pooling_param->set_pad_bottom(2);
+      pooling_param->set_pad_left(2);
+      pooling_param->set_pad_right(1);
       pooling_param->set_pool(PoolingParameter_PoolMethod_AVE);
       PoolingLayer<Dtype> layer(layer_param);
       GradientChecker<Dtype> checker(1e-2, 1e-2);

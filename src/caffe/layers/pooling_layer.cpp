@@ -26,10 +26,12 @@ void PoolingLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       (pool_param.has_kernel_h() && pool_param.has_kernel_w()))
       << "For non-square filters both kernel_h and kernel_w are required.";
   }
-  CHECK((!pool_param.has_pad() && pool_param.has_pad_h()
-      && pool_param.has_pad_w())
-      || (!pool_param.has_pad_h() && !pool_param.has_pad_w()))
-      << "pad is pad OR pad_h and pad_w are required.";
+  CHECK((!pool_param.has_pad() && pool_param.has_pad_top()
+      && pool_param.has_pad_bottom() && pool_param.has_pad_left()
+      && pool_param.has_pad_right())
+      || (!pool_param.has_pad_top() && !pool_param.has_pad_bottom()
+          && !pool_param.has_pad_left() && !pool_param.pad_right()))
+      << "pad is pad OR pad top bottom left right are required.";
   CHECK((!pool_param.has_stride() && pool_param.has_stride_h()
       && pool_param.has_stride_w())
       || (!pool_param.has_stride_h() && !pool_param.has_stride_w()))
@@ -48,11 +50,14 @@ void PoolingLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   }
   CHECK_GT(kernel_h_, 0) << "Filter dimensions cannot be zero.";
   CHECK_GT(kernel_w_, 0) << "Filter dimensions cannot be zero.";
-  if (!pool_param.has_pad_h()) {
-    pad_h_ = pad_w_ = pool_param.pad();
+  if (!pool_param.has_pad_top()) {
+    pad_top_ = pad_bottom_ = pad_left_ = pad_right_ = pool_param.pad();
   } else {
-    pad_h_ = pool_param.pad_h();
-    pad_w_ = pool_param.pad_w();
+    pad_top_ = pool_param.pad_top();
+    pad_bottom_ = pool_param.pad_bottom();
+    pad_left_ = pool_param.pad_left();
+    pad_right_ = pool_param.pad_right();
+
   }
   if (!pool_param.has_stride_h()) {
     stride_h_ = stride_w_ = pool_param.stride();
@@ -61,18 +66,23 @@ void PoolingLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
     stride_w_ = pool_param.stride_w();
   }
   if (global_pooling_) {
-    CHECK(pad_h_ == 0 && pad_w_ == 0 && stride_h_ == 1 && stride_w_ == 1)
+    CHECK(pad_top_ == 0 && pad_bottom_ == 0
+            && pad_left_ == 0 && pad_right_ == 0
+            && stride_h_ == 1 && stride_w_ == 1)
       << "With Global_pooling: true; only pad = 0 and stride = 1";
   }
-  if (pad_h_ != 0 || pad_w_ != 0) {
+  if (pad_top_ != 0 || pad_bottom_ != 0 || pad_left_ != 0
+          || pad_right_ != 0) {
     CHECK(this->layer_param_.pooling_param().pool()
         == PoolingParameter_PoolMethod_AVE
         || this->layer_param_.pooling_param().pool()
         == PoolingParameter_PoolMethod_MAX)
         << "Padding implemented only for average and max pooling.";
-    CHECK_LT(pad_h_, kernel_h_);
-    CHECK_LT(pad_w_, kernel_w_);
-  }
+    CHECK_LT(pad_top_, kernel_h_);
+    CHECK_LT(pad_bottom_, kernel_h_);
+    CHECK_LT(pad_left_, kernel_w_);
+    CHECK_LT(pad_right_, kernel_w_);
+ }
 }
 
 template <typename Dtype>
@@ -88,20 +98,20 @@ void PoolingLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
     kernel_w_ = bottom[0]->width();
   }
   pooled_height_ = static_cast<int>(ceil(static_cast<float>(
-      height_ + 2 * pad_h_ - kernel_h_) / stride_h_)) + 1;
+      height_ + pad_top_ + pad_bottom_ - kernel_h_) / stride_h_)) + 1;
   pooled_width_ = static_cast<int>(ceil(static_cast<float>(
-      width_ + 2 * pad_w_ - kernel_w_) / stride_w_)) + 1;
-  if (pad_h_ || pad_w_) {
+      width_ + pad_left_ + pad_right_ - kernel_w_) / stride_w_)) + 1;
+  if (pad_top_ || pad_bottom_ || pad_left_ || pad_right_) {
     // If we have padding, ensure that the last pooling starts strictly
     // inside the image (instead of at the padding); otherwise clip the last.
-    if ((pooled_height_ - 1) * stride_h_ >= height_ + pad_h_) {
+    if ((pooled_height_ - 1) * stride_h_ >= height_ + pad_top_) {
       --pooled_height_;
     }
-    if ((pooled_width_ - 1) * stride_w_ >= width_ + pad_w_) {
+    if ((pooled_width_ - 1) * stride_w_ >= width_ + pad_left_) {
       --pooled_width_;
     }
-    CHECK_LT((pooled_height_ - 1) * stride_h_, height_ + pad_h_);
-    CHECK_LT((pooled_width_ - 1) * stride_w_, width_ + pad_w_);
+    CHECK_LT((pooled_height_ - 1) * stride_h_, height_ + pad_top_);
+    CHECK_LT((pooled_width_ - 1) * stride_w_, width_ + pad_left_);
   }
   top[0]->Reshape(bottom[0]->num(), channels_, pooled_height_,
       pooled_width_);
@@ -152,8 +162,8 @@ void PoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       for (int c = 0; c < channels_; ++c) {
         for (int ph = 0; ph < pooled_height_; ++ph) {
           for (int pw = 0; pw < pooled_width_; ++pw) {
-            int hstart = ph * stride_h_ - pad_h_;
-            int wstart = pw * stride_w_ - pad_w_;
+            int hstart = ph * stride_h_ - pad_top_;
+            int wstart = pw * stride_w_ - pad_left_;
             int hend = min(hstart + kernel_h_, height_);
             int wend = min(wstart + kernel_w_, width_);
             hstart = max(hstart, 0);
@@ -194,10 +204,10 @@ void PoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       for (int c = 0; c < channels_; ++c) {
         for (int ph = 0; ph < pooled_height_; ++ph) {
           for (int pw = 0; pw < pooled_width_; ++pw) {
-            int hstart = ph * stride_h_ - pad_h_;
-            int wstart = pw * stride_w_ - pad_w_;
-            int hend = min(hstart + kernel_h_, height_ + pad_h_);
-            int wend = min(wstart + kernel_w_, width_ + pad_w_);
+            int hstart = ph * stride_h_ - pad_top_;
+            int wstart = pw * stride_w_ - pad_left_;
+            int hend = min(hstart + kernel_h_, height_ + pad_bottom_);
+            int wend = min(wstart + kernel_w_, width_ + pad_right_);
             int pool_size = (hend - hstart) * (wend - wstart);
             hstart = max(hstart, 0);
             wstart = max(wstart, 0);
@@ -275,10 +285,10 @@ void PoolingLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       for (int c = 0; c < channels_; ++c) {
         for (int ph = 0; ph < pooled_height_; ++ph) {
           for (int pw = 0; pw < pooled_width_; ++pw) {
-            int hstart = ph * stride_h_ - pad_h_;
-            int wstart = pw * stride_w_ - pad_w_;
-            int hend = min(hstart + kernel_h_, height_ + pad_h_);
-            int wend = min(wstart + kernel_w_, width_ + pad_w_);
+            int hstart = ph * stride_h_ - pad_top_;
+            int wstart = pw * stride_w_ - pad_left_;
+            int hend = min(hstart + kernel_h_, height_ + pad_bottom_);
+            int wend = min(wstart + kernel_w_, width_ + pad_right_);
             int pool_size = (hend - hstart) * (wend - wstart);
             hstart = max(hstart, 0);
             wstart = max(wstart, 0);

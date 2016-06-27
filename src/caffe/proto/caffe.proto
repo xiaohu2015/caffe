@@ -904,8 +904,12 @@ message PoolingParameter {
   // Pad, kernel size, and stride are all given as a single value for equal
   // dimensions in height and width or as Y, X pairs.
   optional uint32 pad = 4 [default = 0]; // The padding size (equal in Y, X)
-  optional uint32 pad_h = 9 [default = 0]; // The padding height
-  optional uint32 pad_w = 10 [default = 0]; // The padding width
+  optional uint32 pad_h = 9 [default = 0]; // The padding h
+  optional uint32 pad_w = 10 [default = 0]; // The padding w
+  optional uint32 pad_top = 13 [default = 0]; // The top padding
+  optional uint32 pad_bottom = 14 [default = 0]; // The bottom padding
+  optional uint32 pad_left = 15 [default = 0]; // The left padding
+  optional uint32 pad_right = 16 [default = 0]; // The right padding
   optional uint32 kernel_size = 2; // The kernel size (square)
   optional uint32 kernel_h = 5; // The kernel height
   optional uint32 kernel_w = 6; // The kernel width

@@ -12,15 +12,16 @@ __global__ void MaxPoolForward(const int nthreads,
     const Dtype* const bottom_data, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
-    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
+    const int stride_h, const int stride_w, const int pad_top,
+    const int pad_bottom, const int pad_left, const int pad_right,
     Dtype* const top_data, int* mask, Dtype* top_mask) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
     const int c = (index / pooled_width / pooled_height) % channels;
     const int n = index / pooled_width / pooled_height / channels;
-    int hstart = ph * stride_h - pad_h;
-    int wstart = pw * stride_w - pad_w;
+    int hstart = ph * stride_h - pad_top;
+    int wstart = pw * stride_w - pad_left;
     const int hend = min(hstart + kernel_h, height);
     const int wend = min(wstart + kernel_w, width);
     hstart = max(hstart, 0);
@@ -51,17 +52,18 @@ __global__ void AvePoolForward(const int nthreads,
     const Dtype* const bottom_data, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
-    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
+    const int stride_h, const int stride_w, const int pad_top,
+    const int pad_bottom, const int pad_left, const int pad_right,
     Dtype* const top_data) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
     const int c = (index / pooled_width / pooled_height) % channels;
     const int n = index / pooled_width / pooled_height / channels;
-    int hstart = ph * stride_h - pad_h;
-    int wstart = pw * stride_w - pad_w;
-    int hend = min(hstart + kernel_h, height + pad_h);
-    int wend = min(wstart + kernel_w, width + pad_w);
+    int hstart = ph * stride_h - pad_top;
+    int wstart = pw * stride_w - pad_left;
+    int hend = min(hstart + kernel_h, height + pad_bottom);
+    int wend = min(wstart + kernel_w, width + pad_right);
     const int pool_size = (hend - hstart) * (wend - wstart);
     hstart = max(hstart, 0);
     wstart = max(wstart, 0);
@@ -175,7 +177,8 @@ void PoolingLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
     MaxPoolForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count, bottom_data, bottom[0]->num(), channels_,
         height_, width_, pooled_height_, pooled_width_, kernel_h_,
-        kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, top_data,
+        kernel_w_, stride_h_, stride_w_, pad_top_, pad_bottom_, pad_left_,
+	pad_right_, top_data,
         mask, top_mask);
     break;
   case PoolingParameter_PoolMethod_AVE:
@@ -183,7 +186,8 @@ void PoolingLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
     AvePoolForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count, bottom_data, bottom[0]->num(), channels_,
         height_, width_, pooled_height_, pooled_width_, kernel_h_,
-        kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, top_data);
+        kernel_w_, stride_h_, stride_w_, pad_top_, pad_bottom_, pad_left_,
+	pad_right_, top_data);
     break;
   case PoolingParameter_PoolMethod_STOCHASTIC:
     if (this->phase_ == TRAIN) {
@@ -218,8 +222,9 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* const top_diff,
     const int* const mask, const Dtype* const top_mask, const int num,
     const int channels, const int height, const int width,
     const int pooled_height, const int pooled_width, const int kernel_h,
-    const int kernel_w, const int stride_h, const int stride_w, const int pad_h,
-    const int pad_w, Dtype* const bottom_diff) {
+    const int kernel_w, const int stride_h, const int stride_w,
+    const int pad_top, const int pad_bottom, const int pad_left,
+    const int pad_right, Dtype* const bottom_diff) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
@@ -228,11 +233,11 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* const top_diff,
     const int c = (index / width / height) % channels;
     const int n = index / width / height / channels;
     const int phstart =
-         (h + pad_h < kernel_h) ? 0 : (h + pad_h - kernel_h) / stride_h + 1;
-    const int phend = min((h + pad_h) / stride_h + 1, pooled_height);
+         (h + pad_top < kernel_h) ? 0 : (h + pad_top - kernel_h) / stride_h + 1;
+    const int phend = min((h + pad_bottom) / stride_h + 1, pooled_height);
     const int pwstart =
-         (w + pad_w < kernel_w) ? 0 : (w + pad_w - kernel_w) / stride_w + 1;
-    const int pwend = min((w + pad_w) / stride_w + 1, pooled_width);
+         (w + pad_left < kernel_w) ? 0 : (w + pad_left - kernel_w) / stride_w + 1;
+    const int pwend = min((w + pad_right) / stride_w + 1, pooled_width);
     Dtype gradient = 0;
     const int offset = (n * channels + c) * pooled_height * pooled_width;
     const Dtype* const top_diff_slice = top_diff + offset;
@@ -264,13 +269,14 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
-    const int stride_w, const int pad_h, const int pad_w,
+    const int stride_w, const int pad_top, const int pad_bottom,
+    const int pad_left, const int pad_right,
     Dtype* const bottom_diff) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
-    const int w = index % width + pad_w;
-    const int h = (index / width) % height + pad_h;
+    const int w = index % width + pad_left;
+    const int h = (index / width) % height + pad_right;
     const int c = (index / width / height) % channels;
     const int n = index / width / height / channels;
     const int phstart = (h < kernel_h) ? 0 : (h - kernel_h) / stride_h + 1;
@@ -283,10 +289,10 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
         // figure out the pooling size
-        int hstart = ph * stride_h - pad_h;
-        int wstart = pw * stride_w - pad_w;
-        int hend = min(hstart + kernel_h, height + pad_h);
-        int wend = min(wstart + kernel_w, width + pad_w);
+        int hstart = ph * stride_h - pad_top;
+        int wstart = pw * stride_w - pad_left;
+        int hend = min(hstart + kernel_h, height + pad_bottom);
+        int wend = min(wstart + kernel_w, width + pad_right);
         int pool_size = (hend - hstart) * (wend - wstart);
         gradient += top_diff_slice[ph * pooled_width + pw] / pool_size;
       }
@@ -355,15 +361,16 @@ void PoolingLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
     MaxPoolBackward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count, top_diff, mask, top_mask, top[0]->num(), channels_,
         height_, width_, pooled_height_, pooled_width_,
-        kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_,
-        bottom_diff);
+        kernel_h_, kernel_w_, stride_h_, stride_w_, pad_top_,pad_bottom_,
+	pad_left_, pad_right_, bottom_diff);
     break;
   case PoolingParameter_PoolMethod_AVE:
     // NOLINT_NEXT_LINE(whitespace/operators)
     AvePoolBackward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count, top_diff, top[0]->num(), channels_,
         height_, width_, pooled_height_, pooled_width_, kernel_h_,
-        kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, bottom_diff);
+        kernel_w_, stride_h_, stride_w_, pad_top_, pad_bottom_, pad_left_,
+	pad_right_, bottom_diff);
     break;
   case PoolingParameter_PoolMethod_STOCHASTIC:
     // NOLINT_NEXT_LINE(whitespace/operators)
